@@ -48,7 +48,7 @@
 				const audio = document.createElement('audio');
 				audio.controls = true;
 				audio.src = `/${file}`;
-				audio.preload = 'metadata';
+				audio.preload = 'none';
 				audio.onplay = onplay;
 				audio.onpause = onpause;
 				audio.onseeked = onseeked;

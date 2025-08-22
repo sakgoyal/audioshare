@@ -11,3 +11,4 @@ This is a work in progress and is not yet fully functional.
 - open a browser and connect to the server
 - all audio files in the directory will be listed
 - audio status is reported to the server over websocket
+- This WILL lag your computer if you have too many audio files
