@@ -4,3 +4,10 @@ This project is an audio server that allows you to switch between multiple audio
 This is meant to showcase how to rerceate the spotify connect feature using web technologies.
 
 This is a work in progress and is not yet fully functional.
+
+
+## Current functionality
+- Launch the server next inside directory containing audio files
+- open a browser and connect to the server
+- all audio files in the directory will be listed
+- audio status is reported to the server over websocket

@@ -20,9 +20,8 @@ Deno.serve({ port: 8080 }, (req) => {
 });
 
 
-function handleOnMessage(event: MessageEvent, socket: WebSocket, _response: Response) {
+function handleOnMessage(event: MessageEvent, _socket: WebSocket, _response: Response) {
   console.log("Message received:", event.data);
-  socket.send(`${event.data}`);
 }
 
 async function sendFilesList(socket: WebSocket) {
