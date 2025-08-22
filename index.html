@@ -1,0 +1,87 @@
+<audio controls id="audioPlayer" preload="metadata" src="/01 backrooms.opus"></audio>
+
+<script>
+	const socket = new WebSocket('ws://localhost:8080'); // Use 'wss://' for secure connections
+	socket.onopen = (event) => {
+		console.log('WebSocket connection opened:', event);
+		socket.send('Hello from the client!');
+	};
+
+	socket.onmessage = (event) => { console.log(event.data); };
+	socket.onclose = (event) => { console.log('WebSocket connection closed:', event); };
+	socket.onerror = (error) => { console.error('WebSocket error:', error); };
+
+	/** @type {HTMLAudioElement} */
+	const audioPlayer = document.getElementById('audioPlayer');
+
+	audioPlayer.onseeked = (event) => {
+		const currentTime = event.target.currentTime;
+		console.log('Seeking to:', currentTime);
+		if (socket.readyState === WebSocket.OPEN) {
+			socket.send(JSON.stringify({ type: 'seeked', time: currentTime }));
+		}
+	};
+
+	audioPlayer.onplay = (event) => {
+		if (socket.readyState === WebSocket.OPEN) {
+			socket.send(JSON.stringify({ type: 'play', time: audioPlayer.currentTime }));
+		}
+	};
+
+	audioPlayer.onpause = (event) => {
+		if (socket.readyState === WebSocket.OPEN) {
+			socket.send(JSON.stringify({ type: 'pause', time: audioPlayer.currentTime }));
+		}
+	};
+
+	audioPlayer.onabort = (event) => { // The abort event is fired when the resource was not fully loaded, but not as the result of an error.
+		if (socket.readyState === WebSocket.OPEN) {
+			socket.send(JSON.stringify({ type: 'abort', time: audioPlayer.currentTime }));
+		}
+	};
+
+	audioPlayer.onended = (event) => { // The ended event is fired when playback stops because the end of the media was reached.
+		if (socket.readyState === WebSocket.OPEN) {
+			socket.send(JSON.stringify({ type: 'ended', time: audioPlayer.currentTime }));
+		}
+	};
+
+	audioPlayer.onerror = (event) => { // The error event is fired when a resource failed to load.
+		if (socket.readyState === WebSocket.OPEN) {
+			socket.send(JSON.stringify({ type: 'error', time: audioPlayer.currentTime }));
+		}
+	};
+
+	audioPlayer.onloadedmetadata = (event) => { // The loadedmetadata event is fired when the metadata has been loaded.
+		if (socket.readyState === WebSocket.OPEN) {
+			socket.send(JSON.stringify({ type: 'loadedmetadata', time: audioPlayer.currentTime, duration: audioPlayer.duration }));
+		}
+		// navigator.mediaSession.metadata = new MediaMetadata({
+		// 	title: "Do Not Destroy",
+		// });
+	};
+
+	audioPlayer.onprogress = (event) => { // The progress event is fired periodically as the browser loads a resource.
+		if (socket.readyState === WebSocket.OPEN) {
+			socket.send(JSON.stringify({ type: 'progress', time: audioPlayer.currentTime }));
+		}
+	};
+
+	audioPlayer.onstalled = (event) => { // The stalled event is fired when the user agent is trying to fetch media data, but data is unexpectedly not forthcoming.
+		if (socket.readyState === WebSocket.OPEN) {
+			socket.send(JSON.stringify({ type: 'stalled', time: audioPlayer.currentTime }));
+		}
+	};
+
+	audioPlayer.ontimeupdate = (event) => { // The timeupdate event is fired when the time indicated by the currentTime attribute has been updated.
+		if (socket.readyState === WebSocket.OPEN) {
+			socket.send(JSON.stringify({ type: 'timeupdate', time: audioPlayer.currentTime }));
+		}
+	};
+
+	audioPlayer.onwaiting = (event) => { // The waiting event is fired when playback has stopped because of a temporary lack of data.
+		if (socket.readyState === WebSocket.OPEN) {
+			socket.send(JSON.stringify({ type: 'waiting', time: audioPlayer.currentTime }));
+		}
+	};
+</script>
