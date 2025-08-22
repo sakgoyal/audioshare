@@ -12,3 +12,10 @@ This is a work in progress and is not yet fully functional.
 - all audio files in the directory will be listed
 - audio status is reported to the server over websocket
 - This WILL lag your computer if you have too many audio files
+
+
+## runnning the server
+> make sure you copy the `index.html` file to the directory containing your audio files. the index.ts file is just the backend code
+```sh
+deno run -A index.ts
+```
