@@ -22,3 +22,11 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# ignore audio files
+*.mp3
+*.wav
+*.flac
+*.m4a
+*.ogg
+*.opus
