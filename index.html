@@ -1,87 +1,119 @@
-<audio controls id="audioPlayer" preload="metadata" src="/01 backrooms.opus"></audio>
+<body id="body">
+</body>
+
 
 <script>
-	const socket = new WebSocket('ws://localhost:8080'); // Use 'wss://' for secure connections
+	const socket = new WebSocket('ws://localhost:8080');
+
+	function handleMessage(event) {
+		console.log('Message from server:', event.data);
+		const message = JSON.parse(event.data);
+		if (message.type === 'filesList') {
+			console.log('Received files list:', message.files); // Array of file names
+			// Example: Dynamically create audio elements for each file
+			// attach all audio files to the body like the first example
+			for (const file of message.files) {
+				const audio = document.createElement('audio');
+				audio.controls = true;
+				audio.src = `/${file}`;
+				audio.preload = 'metadata';
+				audio.onplay = onplay;
+				audio.onpause = onpause;
+				audio.onseeked = onseeked;
+				audio.onabort = onabort;
+				audio.onended = onended;
+				audio.onerror = onerror;
+				audio.onprogress = onprogress;
+				audio.onstalled = onstalled;
+				audio.ontimeupdate = ontimeupdate;
+				audio.onwaiting = onwaiting;
+				audio.filename = file; // use this to identify the audio element
+				document.body.appendChild(audio);
+			}
+		}
+
+	}
+
 	socket.onopen = (event) => {
 		console.log('WebSocket connection opened:', event);
-		socket.send('Hello from the client!');
 	};
-
-	socket.onmessage = (event) => { console.log(event.data); };
+	socket.onmessage = handleMessage;
 	socket.onclose = (event) => { console.log('WebSocket connection closed:', event); };
 	socket.onerror = (error) => { console.error('WebSocket error:', error); };
 
-	/** @type {HTMLAudioElement} */
-	const audioPlayer = document.getElementById('audioPlayer');
-
-	audioPlayer.onseeked = (event) => {
+	const onseeked = (event) => {
 		const currentTime = event.target.currentTime;
+		const filename = event.target.filename;
 		console.log('Seeking to:', currentTime);
 		if (socket.readyState === WebSocket.OPEN) {
-			socket.send(JSON.stringify({ type: 'seeked', time: currentTime }));
+			socket.send(JSON.stringify({ type: 'seeked', time: currentTime, filename }));
 		}
 	};
 
-	audioPlayer.onplay = (event) => {
+	const onplay = (event) => {
+		const filename = event.target.filename;
 		if (socket.readyState === WebSocket.OPEN) {
-			socket.send(JSON.stringify({ type: 'play', time: audioPlayer.currentTime }));
+			socket.send(JSON.stringify({ type: 'play', time: event.target.currentTime, filename }));
 		}
 	};
 
-	audioPlayer.onpause = (event) => {
+	const onpause = (event) => {
+		const filename = event.target.filename;
 		if (socket.readyState === WebSocket.OPEN) {
-			socket.send(JSON.stringify({ type: 'pause', time: audioPlayer.currentTime }));
+			socket.send(JSON.stringify({ type: 'pause', time: event.target.currentTime, filename }));
 		}
 	};
 
-	audioPlayer.onabort = (event) => { // The abort event is fired when the resource was not fully loaded, but not as the result of an error.
+	const onabort = (event) => {
+		const filename = event.target.filename;
 		if (socket.readyState === WebSocket.OPEN) {
-			socket.send(JSON.stringify({ type: 'abort', time: audioPlayer.currentTime }));
+			socket.send(JSON.stringify({ type: 'abort', time: event.target.currentTime, filename }));
 		}
 	};
 
-	audioPlayer.onended = (event) => { // The ended event is fired when playback stops because the end of the media was reached.
+	const onended = (event) => {
+		const filename = event.target.filename;
 		if (socket.readyState === WebSocket.OPEN) {
-			socket.send(JSON.stringify({ type: 'ended', time: audioPlayer.currentTime }));
+			socket.send(JSON.stringify({ type: 'ended', time: event.target.currentTime, filename }));
 		}
 	};
 
-	audioPlayer.onerror = (event) => { // The error event is fired when a resource failed to load.
+	const onerror = (event) => {
+		const filename = event.target.filename;
 		if (socket.readyState === WebSocket.OPEN) {
-			socket.send(JSON.stringify({ type: 'error', time: audioPlayer.currentTime }));
+			socket.send(JSON.stringify({ type: 'error', time: event.target.currentTime, filename }));
 		}
 	};
 
-	audioPlayer.onloadedmetadata = (event) => { // The loadedmetadata event is fired when the metadata has been loaded.
-		if (socket.readyState === WebSocket.OPEN) {
-			socket.send(JSON.stringify({ type: 'loadedmetadata', time: audioPlayer.currentTime, duration: audioPlayer.duration }));
-		}
-		// navigator.mediaSession.metadata = new MediaMetadata({
-		// 	title: "Do Not Destroy",
-		// });
-	};
+	// navigator.mediaSession.metadata = new MediaMetadata({
+	// 	title: "Do Not Destroy",
+	// });
 
-	audioPlayer.onprogress = (event) => { // The progress event is fired periodically as the browser loads a resource.
+	const onprogress = (event) => {
+		const filename = event.target.filename;
 		if (socket.readyState === WebSocket.OPEN) {
-			socket.send(JSON.stringify({ type: 'progress', time: audioPlayer.currentTime }));
+			socket.send(JSON.stringify({ type: 'progress', time: event.target.currentTime, filename }));
 		}
 	};
 
-	audioPlayer.onstalled = (event) => { // The stalled event is fired when the user agent is trying to fetch media data, but data is unexpectedly not forthcoming.
+	const onstalled = (event) => {
+		const filename = event.target.filename;
 		if (socket.readyState === WebSocket.OPEN) {
-			socket.send(JSON.stringify({ type: 'stalled', time: audioPlayer.currentTime }));
+			socket.send(JSON.stringify({ type: 'stalled', time: event.target.currentTime, filename }));
 		}
 	};
 
-	audioPlayer.ontimeupdate = (event) => { // The timeupdate event is fired when the time indicated by the currentTime attribute has been updated.
+	const ontimeupdate = (event) => {
+		const filename = event.target.filename;
 		if (socket.readyState === WebSocket.OPEN) {
-			socket.send(JSON.stringify({ type: 'timeupdate', time: audioPlayer.currentTime }));
+			socket.send(JSON.stringify({ type: 'timeupdate', time: event.target.currentTime, filename }));
 		}
 	};
 
-	audioPlayer.onwaiting = (event) => { // The waiting event is fired when playback has stopped because of a temporary lack of data.
+	const onwaiting = (event) => {
+		const filename = event.target.filename;
 		if (socket.readyState === WebSocket.OPEN) {
-			socket.send(JSON.stringify({ type: 'waiting', time: audioPlayer.currentTime }));
+			socket.send(JSON.stringify({ type: 'waiting', time: event.target.currentTime, filename }));
 		}
 	};
 </script>

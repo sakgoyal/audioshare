@@ -1,13 +1,8 @@
-import { serveDir, serveFile } from "jsr:@std/http/file-server";
-
+import { serveDir } from "jsr:@std/http/file-server";
+import { glob } from "node:fs/promises";
 Deno.serve({ port: 80 }, (req) => {
-  const pathname = new URL(req.url).pathname;
-  if (pathname === "/") {
-    return serveFile(req, "index.html");
-  }
   return serveDir(req, {
-    fsRoot: "./public",
-    showDirListing: true,
+    showDirListing: false,
     enableCors: false,
   });
 });
@@ -17,9 +12,22 @@ Deno.serve({ port: 8080 }, (req) => {
     return new Response(null, { status: 426 });
   }
   const { socket, response } = Deno.upgradeWebSocket(req);
-  socket.onopen = () => console.log("WS connected");
-  socket.onmessage = (e) => socket.send(`echo: ${e.data}`);
+  socket.onopen = () => {console.log("WS connected"); sendFilesList(socket);};
+  socket.onmessage = (e) => handleOnMessage(e, socket, response);
   socket.onclose = () => console.log("WS closed");
   socket.onerror = (e) => console.error("WS error:", e);
   return response;
 });
+
+
+function handleOnMessage(event: MessageEvent, socket: WebSocket, _response: Response) {
+  console.log("Message received:", event.data);
+  socket.send(`${event.data}`);
+}
+
+async function sendFilesList(socket: WebSocket) {
+  const files = glob("*.{mp3,wav,aac,flac,ogg,opus}", { cwd: Deno.cwd() });
+  const fileNames = (await Array.fromAsync(files));
+  console.log("Sending files list:", fileNames);
+  socket.send(JSON.stringify({ type: "filesList", files: fileNames }));
+}
