@@ -8,6 +8,17 @@
 			gap: 1rem;
 			font-family: sans-serif;
 			padding: 1rem;
+			max-width: 800px;
+			margin: auto;
+		}
+
+		#clients-list {
+			border: 1px solid #ddd;
+			padding: 1rem;
+			display: flex;
+			flex-direction: column;
+			align-items: flex-start;
+			gap: 0.5rem;
 		}
 
 		.row {
@@ -16,138 +27,207 @@
 			align-items: center;
 			border: 1px solid #ccc;
 			padding: 0.5rem;
+			width: 100%;
+			box-sizing: border-box;
 		}
 
 		.row h2 {
 			margin: 0;
 			font-size: 1.2rem;
+			white-space: nowrap;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			padding-right: 1rem;
+		}
+
+		audio {
+			width: 50%;
+		}
+
+		button:disabled {
+			opacity: 0.5;
+			cursor: not-allowed;
 		}
 	</style>
 </head>
 
 <body>
+	<h1>Audio Files</h1>
+	<div id="audio-container"></div>
+	<hr>
+	<h1>Connected Clients</h1>
+	<div id="clients-list"></div>
 </body>
 
-
+<script>
+	function setupPassword() {
+		if (!localStorage.getItem("groupID")) {
+			const val = prompt("Enter a complicated ascii password:");
+			if (val) localStorage.setItem("groupID", val);
+		}
+		return localStorage.getItem("groupID");
+	}
+	const groupID = setupPassword();
+</script>
 <script>
 	const socket = new WebSocket('ws://localhost:8080');
+	let myClientID = null;
+	let isProgrammaticChange = false;
+
+	function createTransferButton(clientID) {
+		const clientsList = document.getElementById('clients-list');
+		const button = document.createElement('button');
+		button.textContent = `Transfer Playback to ${clientID.substring(0, 8)}`;
+		button.id = `client-${clientID}`;
+		button.onclick = () => {
+			const activeAudio = [...document.querySelectorAll('audio')].find(a => !a.paused);
+			if (activeAudio) {
+				const state = {
+					filename: activeAudio.filename,
+					time: activeAudio.currentTime,
+					isPlaying: !activeAudio.paused
+				};
+				socket.send(JSON.stringify({
+					type: 'transferRequest',
+					groupID,
+					targetClientID: clientID,
+					state
+				}));
+			} else {
+				alert("No audio is currently playing to transfer.");
+			}
+		};
+		clientsList.appendChild(button);
+	}
 
 	function handleMessage(event) {
-		console.log('Message from server:', event.data);
 		const message = JSON.parse(event.data);
-		if (message.type === 'filesList') {
-			console.log('Received files list:', message.files); // Array of file names
-			// Example: Dynamically create audio elements for each file
-			// attach all audio files to the body like the first example
-			for (const file of message.files) {
-				const row = document.createElement("div");
-				row.className = "row";
+		const audioContainer = document.getElementById('audio-container');
+		const clientsList = document.getElementById('clients-list');
 
-				const h2 = document.createElement("h2");
-				h2.textContent = file;
-				const audio = document.createElement('audio');
-				audio.controls = true;
-				audio.src = `/${file}`;
-				audio.preload = 'none';
-				audio.onplay = onplay;
-				audio.onpause = onpause;
-				audio.onseeked = onseeked;
-				audio.onabort = onabort;
-				audio.onended = onended;
-				audio.onerror = onerror;
-				audio.onprogress = onprogress;
-				audio.onstalled = onstalled;
-				audio.ontimeupdate = ontimeupdate;
-				audio.onwaiting = onwaiting;
-				audio.filename = file; // use this to identify the audio element
-				row.appendChild(h2);
-				row.appendChild(audio);
-				document.body.appendChild(row);
-			}
+		switch (message.type) {
+			case 'registered':
+				myClientID = message.clientID;
+				console.log('Registered with ID:', myClientID);
+				document.title = `Audio Share - ${myClientID.substring(0, 8)}`;
+				message.existingClients.forEach(clientID => createTransferButton(clientID));
+				break;
+
+			case 'newClient':
+				console.log('New client joined:', message.clientID);
+				if (message.clientID !== myClientID) {
+					createTransferButton(message.clientID);
+				}
+				break;
+
+			case 'clientLeft':
+				console.log('Client left:', message.clientID);
+				const button = document.getElementById(`client-${message.clientID}`);
+				if (button) {
+					button.remove();
+				}
+				break;
+
+			case 'filesList':
+				for (const file of message.files) {
+					const row = document.createElement("div");
+					row.className = "row";
+					const h2 = document.createElement("h2");
+					h2.textContent = file;
+					const audio = document.createElement('audio');
+					audio.controls = true;
+					audio.src = `/${file}`;
+					audio.preload = 'none';
+					audio.filename = file;
+					audio.onplay = onplay;
+					audio.onpause = onpause;
+					audio.onseeked = onseeked;
+					row.appendChild(h2);
+					row.appendChild(audio);
+					audioContainer.appendChild(row);
+				}
+				break;
+
+			case 'stateUpdate':
+				const { filename, time, type } = message.state;
+				const audioToUpdate = [...document.querySelectorAll('audio')].find(a => a.filename === filename);
+				if (audioToUpdate) {
+					isProgrammaticChange = true;
+					document.querySelectorAll('audio').forEach(a => {
+						a.pause();
+						if (a !== audioToUpdate && type === 'play') {
+							a.currentTime = 0;
+						}
+					});
+					audioToUpdate.currentTime = time;
+					setTimeout(() => isProgrammaticChange = false, 100);
+				}
+				break;
+
+			case 'applyState':
+				const audioToApply = [...document.querySelectorAll('audio')].find(a => a.filename === message.state.filename);
+				if (audioToApply) {
+					isProgrammaticChange = true;
+					document.querySelectorAll('audio').forEach(a => {
+						if (a !== audioToApply) a.pause();
+					});
+					audioToApply.currentTime = message.state.time;
+					if (message.state.isPlaying) {
+						audioToApply.play();
+					} else {
+						audioToApply.pause();
+					}
+					setTimeout(() => isProgrammaticChange = false, 100);
+				}
+				break;
+
+			case 'pausePlayback':
+				const activeAudio = [...document.querySelectorAll('audio')].find(a => !a.paused);
+				if (activeAudio) {
+					isProgrammaticChange = true;
+					activeAudio.pause();
+					setTimeout(() => isProgrammaticChange = false, 100);
+				}
+				break;
 		}
-
 	}
 
 	socket.onopen = (event) => {
 		console.log('WebSocket connection opened:', event);
+		if (groupID) {
+			socket.send(JSON.stringify({ type: 'register', groupID }));
+		}
 	};
 	socket.onmessage = handleMessage;
 	socket.onclose = (event) => { console.log('WebSocket connection closed:', event); };
 	socket.onerror = (error) => { console.error('WebSocket error:', error); };
 
-	const onseeked = (event) => {
-		const currentTime = event.target.currentTime;
-		const filename = event.target.filename;
-		console.log('Seeking to:', currentTime);
+	function sendStateUpdate(event, type) {
+		if (isProgrammaticChange) return;
 		if (socket.readyState === WebSocket.OPEN) {
-			socket.send(JSON.stringify({ type: 'seeked', time: currentTime, filename }));
+			socket.send(JSON.stringify({
+				groupID,
+				type,
+				time: event.target.currentTime,
+				filename: event.target.filename
+			}));
 		}
-	};
+	}
+
+	const onseeked = (event) => sendStateUpdate(event, 'seeked');
 
 	const onplay = (event) => {
-		const filename = event.target.filename;
-		if (socket.readyState === WebSocket.OPEN) {
-			socket.send(JSON.stringify({ type: 'play', time: event.target.currentTime, filename }));
-		}
+		if (isProgrammaticChange) return;
+		const targetAudio = event.target;
+		targetAudio.currentTime = 0;
+		document.querySelectorAll('audio').forEach(audio => {
+			if (audio !== targetAudio) {
+				audio.pause();
+				audio.currentTime = 0;
+			}
+		});
+		sendStateUpdate(event, 'play');
 	};
 
-	const onpause = (event) => {
-		const filename = event.target.filename;
-		if (socket.readyState === WebSocket.OPEN) {
-			socket.send(JSON.stringify({ type: 'pause', time: event.target.currentTime, filename }));
-		}
-	};
-
-	const onabort = (event) => {
-		const filename = event.target.filename;
-		if (socket.readyState === WebSocket.OPEN) {
-			socket.send(JSON.stringify({ type: 'abort', time: event.target.currentTime, filename }));
-		}
-	};
-
-	const onended = (event) => {
-		const filename = event.target.filename;
-		if (socket.readyState === WebSocket.OPEN) {
-			socket.send(JSON.stringify({ type: 'ended', time: event.target.currentTime, filename }));
-		}
-	};
-
-	const onerror = (event) => {
-		const filename = event.target.filename;
-		if (socket.readyState === WebSocket.OPEN) {
-			socket.send(JSON.stringify({ type: 'error', time: event.target.currentTime, filename }));
-		}
-	};
-
-	// navigator.mediaSession.metadata = new MediaMetadata({
-	// 	title: "Do Not Destroy",
-	// });
-
-	const onprogress = (event) => {
-		const filename = event.target.filename;
-		if (socket.readyState === WebSocket.OPEN) {
-			socket.send(JSON.stringify({ type: 'progress', time: event.target.currentTime, filename }));
-		}
-	};
-
-	const onstalled = (event) => {
-		const filename = event.target.filename;
-		if (socket.readyState === WebSocket.OPEN) {
-			socket.send(JSON.stringify({ type: 'stalled', time: event.target.currentTime, filename }));
-		}
-	};
-
-	const ontimeupdate = (event) => {
-		const filename = event.target.filename;
-		if (socket.readyState === WebSocket.OPEN) {
-			socket.send(JSON.stringify({ type: 'timeupdate', time: event.target.currentTime, filename }));
-		}
-	};
-
-	const onwaiting = (event) => {
-		const filename = event.target.filename;
-		if (socket.readyState === WebSocket.OPEN) {
-			socket.send(JSON.stringify({ type: 'waiting', time: event.target.currentTime, filename }));
-		}
-	};
+	const onpause = (event) => sendStateUpdate(event, 'pause');
 </script>
