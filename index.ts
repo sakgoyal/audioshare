@@ -1,109 +1,142 @@
-import { serveDir } from "jsr:@std/http/file-server";
-import { glob } from "node:fs/promises";
+import { serveDir } from 'jsr:@std/http/file-server';
+import { Server } from 'npm:socket.io';
+import { glob } from 'node:fs/promises';
 
 Deno.serve({ port: 80 }, (req) => {
-  return serveDir(req, {
-    showDirListing: false,
-    enableCors: false,
-  });
+	return serveDir(req, {
+		fsRoot: '.',
+		quiet: true,
+	});
 });
 
-const clients = new Map<string, Map<string, WebSocket>>();
+const io = new Server(3000, {
+	cors: { origin: '*' },
+	pingInterval: 5000,
+});
 
-function broadcast(groupID: string, message: object, excludeClientID?: string) {
-  const group = clients.get(groupID);
-  if (!group) return;
-  const stringifiedMessage = JSON.stringify(message);
-  for (const [clientID, socket] of group.entries()) {
-    if (clientID !== excludeClientID && socket.readyState === WebSocket.OPEN) {
-      socket.send(stringifiedMessage);
-    }
-  }
-}
+type ClientState = {
+	isPlaying: boolean;
+	currentTrack: string | null;
+};
 
-Deno.serve({ port: 8080 }, (req) => {
-  if (req.headers.get("upgrade") != "websocket") {
-    return new Response(null, { status: 426 });
-  }
+const clientStates = new Map<string, ClientState>();
 
-  const { socket, response } = Deno.upgradeWebSocket(req);
-  let clientID: string | null = null;
-  let groupID: string | null = null;
+io.on('connection', (socket) => {
+	console.log(`Socket connected: ${socket.id}`);
+	let groupID: string | null = null;
 
-  socket.onopen = () => console.log("WS connected");
+	socket.on('register', async (id: string) => {
+		groupID = id;
+		await socket.join(groupID);
+		console.log(`Socket ${socket.id} joined group ${groupID}`);
 
-  socket.onmessage = async (e) => {
-    const message = JSON.parse(e.data);
+		clientStates.set(socket.id, { isPlaying: false, currentTrack: null });
 
-    switch (message.type) {
-      case "register": {
-        clientID = crypto.randomUUID();
-        groupID = message.groupID;
+		const otherSockets = await io.in(groupID).fetchSockets();
+		const existingClients = otherSockets
+			.map((s) => s.id)
+			.filter((id) => id !== socket.id);
 
-        if (!clients.has(groupID)) {
-          clients.set(groupID, new Map());
-        }
-        const group = clients.get(groupID)!;
+		socket.emit('registered', {
+			clientID: socket.id,
+			existingClients,
+		});
 
-        broadcast(groupID, { type: "newClient", clientID });
+		socket.broadcast.to(groupID).emit('newClient', socket.id);
 
-        socket.send(JSON.stringify({
-          type: "registered",
-          clientID,
-          existingClients: Array.from(group.keys()),
-        }));
+		// Send current states to all clients
+		const allStates: Record<string, ClientState> = {};
+		for (const [clientID, state] of clientStates) {
+			allStates[clientID] = state;
+		}
+		io.to(groupID).emit('clientStates', allStates);
 
-        group.set(clientID, socket);
+		const files = glob('*.{mp3,wav,aac,flac,ogg,opus}', { cwd: Deno.cwd() });
+		const fileNames = await Array.fromAsync(files);
+		socket.emit('filesList', fileNames);
+	});
 
-        const files = glob("*.{mp3,wav,aac,flac,ogg,opus}", {
-          cwd: Deno.cwd(),
-        });
-        const fileNames = await Array.fromAsync(files);
-        socket.send(JSON.stringify({ type: "filesList", files: fileNames }));
-        console.log(`Client ${clientID} registered to group ${groupID}`);
-        break;
-      }
-      case "transferRequest": {
-        const { targetClientID, state } = message;
-        const targetGroup = clients.get(message.groupID);
-        const targetSocket = targetGroup?.get(targetClientID);
-        if (targetSocket && targetSocket.readyState === WebSocket.OPEN) {
-          targetSocket.send(JSON.stringify({ type: "applyState", state }));
-          socket.send(JSON.stringify({ type: "pausePlayback" }));
-        }
-        break;
-      }
-      default: {
-        if (message.groupID && clientID) {
-          broadcast(message.groupID, {
-            type: "stateUpdate",
-            state: {
-              type: message.type,
-              time: message.time,
-              filename: message.filename,
-            },
-          }, clientID);
-        }
-        break;
-      }
-    }
-  };
+	socket.on('play', (state: { filename: string; time: number }) => {
+		if (groupID) {
+			const clientState = clientStates.get(socket.id);
+			if (clientState) {
+				clientState.isPlaying = true;
+				clientState.currentTrack = state.filename;
+			}
+			socket.broadcast.to(groupID).emit('stateUpdate', { type: 'play', ...state, clientID: socket.id });
+			broadcastStates(groupID);
+		}
+	});
 
-  socket.onclose = () => {
-    if (groupID && clientID) {
-      const group = clients.get(groupID);
-      if (group) {
-        group.delete(clientID);
-        if (group.size === 0) {
-          clients.delete(groupID);
-        }
-      }
-      broadcast(groupID, { type: "clientLeft", clientID });
-    }
-    console.log("WS closed");
-  };
+	socket.on('pause', (state: { filename: string; time: number }) => {
+		if (groupID) {
+			const clientState = clientStates.get(socket.id);
+			if (clientState) {
+				clientState.isPlaying = false;
+				clientState.currentTrack = null;
+			}
+			socket.broadcast.to(groupID).emit('stateUpdate', { type: 'pause', ...state, clientID: socket.id });
+			broadcastStates(groupID);
+		}
+	});
 
-  socket.onerror = (e) => console.error("WS error:", e);
+	socket.on('seeked', (state: { filename: string; time: number }) => {
+		if (groupID) {
+			socket.broadcast.to(groupID).emit('stateUpdate', { type: 'seeked', ...state, clientID: socket.id });
+		}
+	});
 
-  return response;
+	socket.on('transferRequest', ({ targetClientID, state }) => {
+		const sourceState = clientStates.get(socket.id);
+		const targetState = clientStates.get(targetClientID);
+
+		if (sourceState) {
+			sourceState.isPlaying = false;
+			sourceState.currentTrack = null;
+		}
+
+		if (targetState) {
+			targetState.isPlaying = true;
+			targetState.currentTrack = state.filename;
+		}
+
+		io.to(targetClientID).emit('applyState', state);
+		socket.emit('pausePlayback');
+
+		if (groupID) broadcastStates(groupID);
+		console.log(`Transferring playback from ${socket.id} to ${targetClientID}`);
+	});
+
+	socket.on('pullRequest', ({ sourceClientID }) => {
+		if (sourceClientID === 'any') {
+			for (const [clientID, state] of clientStates) {
+				if (state.isPlaying && clientID !== socket.id) {
+					io.to(clientID).emit('requestCurrentState', socket.id);
+					console.log(`${socket.id} requesting playback from any playing client: ${clientID}`);
+					return;
+				}
+			}
+			console.log(`${socket.id} requested pull but no clients are playing`);
+		} else {
+			io.to(sourceClientID).emit('requestCurrentState', socket.id);
+			console.log(`${socket.id} requesting playback from ${sourceClientID}`);
+		}
+	});
+
+	socket.on('disconnect', () => {
+		if (groupID) {
+			io.to(groupID).emit('clientLeft', socket.id);
+			clientStates.delete(socket.id);
+			broadcastStates(groupID);
+		}
+		console.log(`Socket disconnected: ${socket.id}`);
+	});
+
+	function broadcastStates(groupID: string) {
+		const allStates: Record<string, ClientState> = {};
+		for (const [clientID, state] of clientStates) {
+			allStates[clientID] = state;
+		}
+		io.to(groupID).emit('clientStates', allStates);
+	}
 });
