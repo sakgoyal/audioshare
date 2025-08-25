@@ -20,5 +20,8 @@ This is a work in progress and is not yet fully functional.
 deno run -A index.ts
 ```
 
-## Showcase (Last updated Aug 23, 2025. hash: 0bca7d8)
-https://github.com/user-attachments/assets/d679d769-cc4e-4c5b-b10d-0d24c2c71f34
+## Showcase (Last updated Aug 25, 2025. hash: 5cd5fbd)
+some syncing issues and edge cases. but functional
+
+https://github.com/user-attachments/assets/63b6fe73-399d-454d-ab31-a8aaced8bb51
+
