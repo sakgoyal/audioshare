@@ -30,3 +30,4 @@ dist-ssr
 *.m4a
 *.ogg
 *.opus
+client.js

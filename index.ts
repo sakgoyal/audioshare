@@ -2,141 +2,155 @@ import { serveDir } from 'jsr:@std/http/file-server';
 import { Server } from 'npm:socket.io';
 import { glob } from 'node:fs/promises';
 
-Deno.serve({ port: 80 }, (req) => {
-	return serveDir(req, {
+Deno.serve({ port: 80 }, (req) =>
+	serveDir(req, {
 		fsRoot: '.',
 		quiet: true,
-	});
-});
+	}));
 
-const io = new Server(3000, {
+const io = new Server<ClientToServerEvents, ServerToClientEvents>(3000, {
+	serveClient: false,
 	cors: { origin: '*' },
-	pingInterval: 5000,
+	pingInterval: 1000,
+	pingTimeout: 3000,
 });
 
-type ClientState = {
-	isPlaying: boolean;
-	currentTrack: string | null;
-};
-
-const clientStates = new Map<string, ClientState>();
+const groupStates = new Map<string, GlobalState>();
+const clientGroups = new Map<string, string>();
 
 io.on('connection', (socket) => {
 	console.log(`Socket connected: ${socket.id}`);
-	let groupID: string | null = null;
 
-	socket.on('register', async (id: string) => {
-		groupID = id;
+	socket.on('register', async (groupID) => {
 		await socket.join(groupID);
+		clientGroups.set(socket.id, groupID);
 		console.log(`Socket ${socket.id} joined group ${groupID}`);
 
-		clientStates.set(socket.id, { isPlaying: false, currentTrack: null });
-
-		const otherSockets = await io.in(groupID).fetchSockets();
-		const existingClients = otherSockets
-			.map((s) => s.id)
-			.filter((id) => id !== socket.id);
-
-		socket.emit('registered', {
-			clientID: socket.id,
-			existingClients,
-		});
-
-		socket.broadcast.to(groupID).emit('newClient', socket.id);
-
-		// Send current states to all clients
-		const allStates: Record<string, ClientState> = {};
-		for (const [clientID, state] of clientStates) {
-			allStates[clientID] = state;
+		// Initialize group state if it doesn't exist
+		if (!groupStates.has(groupID)) {
+			groupStates.set(groupID, {
+				isPlaying: false,
+				currentTrack: null,
+				currentTime: 0,
+				activeClientID: null,
+			});
 		}
-		io.to(groupID).emit('clientStates', allStates);
 
-		const files = glob('*.{mp3,wav,aac,flac,ogg,opus}', { cwd: Deno.cwd() });
+		const otherSockets = (await io.in(groupID).fetchSockets()).map((s) => s.id)
+
+		socket.emit('clientList', otherSockets);
+
+		socket.broadcast.to(groupID).emit('clientList', otherSockets);
+
+		// Send current global state to the new client
+		const currentState = groupStates.get(groupID);
+		if (currentState) {
+			socket.emit('globalState', currentState);
+		}
+
+		const files = glob('*.{mp3,wav,aac,flac,ogg,opus}', { cwd: 'C:/Users/Saksham/Music/' });
 		const fileNames = await Array.fromAsync(files);
+		// limit to 10 files
+		fileNames.splice(10);
 		socket.emit('filesList', fileNames);
 	});
 
-	socket.on('play', (state: { filename: string; time: number }) => {
+	socket.on('play', (data) => {
+		const groupID = clientGroups.get(socket.id);
 		if (groupID) {
-			const clientState = clientStates.get(socket.id);
-			if (clientState) {
-				clientState.isPlaying = true;
-				clientState.currentTrack = state.filename;
+			const state = groupStates.get(groupID);
+			if (state) {
+				state.isPlaying = true;
+				state.currentTrack = data.filename;
+				state.currentTime = data.time;
+				state.activeClientID = socket.id;
+
+				io.to(groupID).emit('globalState', state);
+				console.log(`Play: ${socket.id} playing ${data.filename} at ${data.time}`);
 			}
-			socket.broadcast.to(groupID).emit('stateUpdate', { type: 'play', ...state, clientID: socket.id });
-			broadcastStates(groupID);
 		}
 	});
 
-	socket.on('pause', (state: { filename: string; time: number }) => {
+	socket.on('pause', (data) => {
+		const groupID = clientGroups.get(socket.id);
 		if (groupID) {
-			const clientState = clientStates.get(socket.id);
-			if (clientState) {
-				clientState.isPlaying = false;
-				clientState.currentTrack = null;
+			const state = groupStates.get(groupID);
+			if (state) {
+				state.isPlaying = false;
+				state.currentTime = data.time;
+
+				io.to(groupID).emit('globalState', state);
+				console.log(`Pause: ${socket.id} paused at ${data.time}`);
 			}
-			socket.broadcast.to(groupID).emit('stateUpdate', { type: 'pause', ...state, clientID: socket.id });
-			broadcastStates(groupID);
 		}
 	});
 
-	socket.on('seeked', (state: { filename: string; time: number }) => {
+	socket.on('seeked', (data) => {
+		const groupID = clientGroups.get(socket.id);
 		if (groupID) {
-			socket.broadcast.to(groupID).emit('stateUpdate', { type: 'seeked', ...state, clientID: socket.id });
+			const state = groupStates.get(groupID);
+			if (state && state.activeClientID === socket.id) {
+				state.currentTime = data.time;
+
+				io.to(groupID).emit('globalState', state);
+				console.log(`Seek: ${socket.id} seeked to ${data.time}`);
+			}
 		}
 	});
 
-	socket.on('transferRequest', ({ targetClientID, state }) => {
-		const sourceState = clientStates.get(socket.id);
-		const targetState = clientStates.get(targetClientID);
+	socket.on('transferRequest', ({ targetClientID, state: clientState }) => {
+		const groupID = clientGroups.get(socket.id);
+		if (groupID) {
+			const state = groupStates.get(groupID);
+			if (state) {
+				state.isPlaying = clientState.isPlaying;
+				state.currentTrack = clientState.filename;
+				state.currentTime = clientState.time;
+				state.activeClientID = targetClientID;
 
-		if (sourceState) {
-			sourceState.isPlaying = false;
-			sourceState.currentTrack = null;
+				io.to(groupID).emit('globalState', state);
+				console.log(`Transfer: from ${socket.id} to ${targetClientID}`);
+			}
 		}
-
-		if (targetState) {
-			targetState.isPlaying = true;
-			targetState.currentTrack = state.filename;
-		}
-
-		io.to(targetClientID).emit('applyState', state);
-		socket.emit('pausePlayback');
-
-		if (groupID) broadcastStates(groupID);
-		console.log(`Transferring playback from ${socket.id} to ${targetClientID}`);
 	});
 
 	socket.on('pullRequest', ({ sourceClientID }) => {
-		if (sourceClientID === 'any') {
-			for (const [clientID, state] of clientStates) {
-				if (state.isPlaying && clientID !== socket.id) {
-					io.to(clientID).emit('requestCurrentState', socket.id);
-					console.log(`${socket.id} requesting playback from any playing client: ${clientID}`);
-					return;
+		const groupID = clientGroups.get(socket.id);
+		if (groupID) {
+			const state = groupStates.get(groupID);
+			if (state) {
+				if (sourceClientID === 'any') {
+					if (state.isPlaying && state.activeClientID) {
+						io.to(state.activeClientID).emit('requestCurrentState', socket.id);
+						console.log(`Pull request: ${socket.id} requesting from active client ${state.activeClientID}`);
+					} else {
+						console.log(`Pull request: ${socket.id} requested but no active playback`);
+					}
+				} else {
+					io.to(sourceClientID).emit('requestCurrentState', socket.id);
+					console.log(`Pull request: ${socket.id} requesting from ${sourceClientID}`);
 				}
 			}
-			console.log(`${socket.id} requested pull but no clients are playing`);
-		} else {
-			io.to(sourceClientID).emit('requestCurrentState', socket.id);
-			console.log(`${socket.id} requesting playback from ${sourceClientID}`);
 		}
 	});
 
-	socket.on('disconnect', () => {
+	socket.on('disconnect', async () => {
+		const groupID = clientGroups.get(socket.id);
 		if (groupID) {
-			io.to(groupID).emit('clientLeft', socket.id);
-			clientStates.delete(socket.id);
-			broadcastStates(groupID);
+			const state = groupStates.get(groupID);
+			if (state && state.activeClientID === socket.id) {
+				// If the disconnecting client was the active one, clear the state
+				state.isPlaying = false;
+				state.activeClientID = null;
+				io.to(groupID).emit('globalState', state);
+			}
+
+			const sockets = await io.in(groupID).fetchSockets()
+			const clients = sockets.map(s => s.id);
+
+			io.to(groupID).emit('clientList', clients);
+			clientGroups.delete(socket.id);
 		}
 		console.log(`Socket disconnected: ${socket.id}`);
 	});
-
-	function broadcastStates(groupID: string) {
-		const allStates: Record<string, ClientState> = {};
-		for (const [clientID, state] of clientStates) {
-			allStates[clientID] = state;
-		}
-		io.to(groupID).emit('clientStates', allStates);
-	}
 });

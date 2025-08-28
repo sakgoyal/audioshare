@@ -3,6 +3,24 @@
 		"indentWidth": 4,
 		"useTabs": true,
 		"singleQuote": true,
-		"lineWidth": 320
+		"lineWidth": 320,
+		"proseWrap": "preserve"
+	},
+	"imports": {
+		"socket.io-client": "npm:socket.io-client@^4.8.1"
+	},
+	"compilerOptions": {
+		"checkJs": true,
+		"strict": true,
+		"skipLibCheck": true,
+		"erasableSyntaxOnly": true,
+		"lib": [
+			"dom",
+			"dom.iterable",
+			"esnext",
+			"deno.ns",
+			"deno.window"
+		],
+		"verbatimModuleSyntax": true
 	}
 }
