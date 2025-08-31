@@ -10,6 +10,7 @@ interface ServerToClientEvents {
 	globalState: (state: GlobalState) => void;
 	filesList: (files: string[]) => void;
 	requestCurrentState: (requestingClientID: string) => void;
+	musicMetadata: (metadata: { title?: string; artist?: string; album?: string; lyrics?: ILyricsTag[] }) => void;
 }
 
 interface ClientToServerEvents {

@@ -11,32 +11,33 @@ function setupPassword() {
 	}
 	return localStorage.getItem('groupID');
 }
+
 const groupID = setupPassword();
+if (!groupID) throw new Error('Group ID is required')
 
 const socket: Socket<ServerToClientEvents, ClientToServerEvents> = io('ws://localhost:3000');
-let myClientID = null;
 let isProgrammaticChange = false;
 let myPlayAction = false; // Track when I initiated a play action
-let connectedClients = new Set();
-let globalState = {
+let connectedClients = new Set<string>();
+let globalState: GlobalState = {
 	isPlaying: false,
 	currentTrack: null,
 	currentTime: 0,
 	activeClientID: null,
 };
 
-function getActiveAudio() {
+function getActiveAudio(): HTMLAudioElement | undefined {
 	return [...document.querySelectorAll('audio')].find((a) => !a.paused);
 }
 
 function renderClients() {
-	const clientsList = document.getElementById('clients-list');
+	const clientsList = document.getElementById('clients-list') as HTMLDivElement;
 	clientsList.innerHTML = '';
 
 	const sortedClientIDs = Array.from(connectedClients).sort();
 
 	for (const clientID of sortedClientIDs) {
-		const isSelf = clientID === myClientID;
+		const isSelf = clientID === socket.id;
 		const isActive = globalState.activeClientID === clientID;
 		const shortID = clientID.substring(0, 8);
 
@@ -45,7 +46,7 @@ function renderClients() {
 
 		const statusText = isActive && globalState.isPlaying ? `Playing: ${globalState.currentTrack}` : 'Idle';
 
-		row.innerHTML = `<div><strong>${shortID}${isSelf ? ' (You)' : ''}</strong><br><small style="color: ${isActive && globalState.isPlaying ? '#4CAF50' : '#999'}">${statusText}</small></div>`;
+		row.innerHTML = `<div><strong>${isSelf ? 'This Device - ' : ''}</strong> ${shortID}<br><small style="color: ${isActive && globalState.isPlaying ? '#4CAF50' : '#999'}">${statusText}</small></div>`;
 
 		row.onclick = () => {
 			if (isSelf) {
@@ -56,7 +57,7 @@ function renderClients() {
 					socket.emit('transferRequest', {
 						targetClientID: clientID,
 						state: {
-							filename: activeAudio.filename,
+							filename: activeAudio.ariaLabel!,
 							time: activeAudio.currentTime,
 							isPlaying: !activeAudio.paused,
 						},
@@ -80,7 +81,7 @@ function applyGlobalState() {
 	}
 
 	const targetAudio = [...document.querySelectorAll('audio')].find(
-		(a) => a.filename === globalState.currentTrack,
+		(a) => a.ariaLabel === globalState.currentTrack,
 	);
 
 	if (!targetAudio) return;
@@ -99,7 +100,7 @@ function applyGlobalState() {
 	targetAudio.currentTime = globalState.currentTime;
 
 	if (globalState.isPlaying) {
-		if (globalState.activeClientID === myClientID) {
+		if (globalState.activeClientID === socket.id) {
 			// Only this client should actually play audio
 			targetAudio.play().catch((e) => console.error('Play failed:', e));
 		} else {
@@ -115,55 +116,50 @@ function applyGlobalState() {
 }
 
 socket.on('connect', () => {
-	console.log('Socket.IO connection opened:', socket.id);
 	if (groupID) {
 		socket.emit('register', groupID);
 	}
 });
 
-socket.on('clientList', (clientID) => {
-	console.log('Client List Updated:', clientID);
-	connectedClients = new Set(clientID);
+socket.on('clientList', (clientList) => {
+	console.log('ClientList=', clientList);
+	connectedClients = new Set(clientList);
 	renderClients();
 });
 
 socket.on('globalState', (newState) => {
 	console.log('Received global state:', JSON.stringify(newState, null, 2));
 	console.log('Previous global state:', JSON.stringify(globalState, null, 2));
-	console.log('myPlayAction:', myPlayAction, 'newState.activeClientID === myClientID:', newState.activeClientID === myClientID);
+	console.log('myPlayAction:', myPlayAction, 'newState.activeClientID === socket.id:', newState.activeClientID === socket.id);
 
 	// Always update the global state
 	globalState = { ...newState };
 
 	// If this was my own play action, don't apply it to audio elements (they're already correct)
-	if (myPlayAction && newState.activeClientID === myClientID) {
+	if (myPlayAction && newState.activeClientID === socket.id) {
 		console.log('This was my play action, skipping audio application but updating UI');
 		renderClients();
 	} else {
 		// Apply state for other clients' actions or state changes
-		console.log('Applying global state to audio elements');
 		applyGlobalState();
 	}
 });
 
 socket.on('filesList', (files) => {
-	const audioContainer = document.getElementById('audio-container');
+	const audioContainer = document.getElementById('audio-container') as HTMLDivElement;
 	audioContainer.innerHTML = '';
 	for (const file of files) {
 		const row = document.createElement('div');
-		row.className = 'row';
-		const h2 = document.createElement('h2');
-		h2.textContent = file;
-		const audio = document.createElement('audio');
-		audio.controls = true;
-		audio.src = `/${file}`;
-		audio.preload = 'none';
-		audio.filename = file;
+		row.innerHTML = `
+			<div class="row">
+				<h2>${file}</h2>
+				<audio controls src="/${file}" preload="none" aria-label="${file}"></audio>
+			</div>
+		`;
+		const audio = row.querySelector('audio') as HTMLAudioElement;
 		audio.onplay = onplay;
 		audio.onpause = onpause;
 		audio.onseeked = onseeked;
-		row.appendChild(h2);
-		row.appendChild(audio);
 		audioContainer.appendChild(row);
 	}
 });
@@ -171,31 +167,25 @@ socket.on('filesList', (files) => {
 socket.on('requestCurrentState', (requestingClientID) => {
 	const activeAudio = getActiveAudio();
 	if (activeAudio) {
-		const state = {
-			filename: activeAudio.filename,
-			time: activeAudio.currentTime,
-			isPlaying: !activeAudio.paused,
-		};
+		const state = { filename: activeAudio.ariaLabel!, time: activeAudio.currentTime, isPlaying: !activeAudio.paused };
 		socket.emit('transferRequest', { targetClientID: requestingClientID, state });
 	}
 });
 
-function sendStateUpdate(event, type) {
+function sendStateUpdate(event: Event, type: keyof ClientToServerEvents) {
 	if (isProgrammaticChange) return;
-	socket.emit(type, {
-		time: event.target.currentTime,
-		filename: event.target.filename,
-	});
+	const { currentTime, ariaLabel } = event.target as HTMLAudioElement;
+	socket.emit(type, { time: currentTime, filename: ariaLabel });
 }
 
-const onseeked = (event) => sendStateUpdate(event, 'seeked');
+const onseeked = (event: Event) => sendStateUpdate(event, 'seeked');
 
-const onplay = (event) => {
+const onplay = (event: Event) => {
 	if (isProgrammaticChange) return;
-	const targetAudio = event.target;
+	const targetAudio = event.target as HTMLAudioElement;
 
 	console.log('User initiated play:', {
-		filename: targetAudio.filename,
+		filename: targetAudio.ariaLabel,
 		currentTime: targetAudio.currentTime,
 		myPlayAction: myPlayAction,
 	});
@@ -219,9 +209,9 @@ const onplay = (event) => {
 
 	// Update local state optimistically
 	globalState.isPlaying = true;
-	globalState.currentTrack = targetAudio.filename;
+	globalState.currentTrack = targetAudio.ariaLabel;
 	globalState.currentTime = targetAudio.currentTime;
-	globalState.activeClientID = myClientID;
+	globalState.activeClientID = socket.id!;
 
 	console.log('Updated local globalState optimistically:', globalState);
 
@@ -235,13 +225,22 @@ const onplay = (event) => {
 	}, 500); // Increased timeout to be safer
 };
 
-const onpause = (event) => {
+const onpause = (event: Event) => {
 	if (isProgrammaticChange) return;
 
-	console.log('User initiated pause:', {
-		filename: event.target.filename,
-		currentTime: event.target.currentTime,
-	});
+	const {ariaLabel, currentTime} = event.target as HTMLAudioElement;
+
+	console.log('User initiated pause:', { filename: ariaLabel, currentTime: currentTime });
 
 	sendStateUpdate(event, 'pause');
 };
+
+socket.on('musicMetadata', (metadata) => {
+	console.log('Received music metadata:', metadata);
+	navigator.mediaSession.metadata = new MediaMetadata({
+		title: metadata.title ?? globalState.currentTrack ?? 'Unknown Title',
+		artist: metadata.artist ?? 'Unknown Artist',
+		album: metadata.album ?? 'Unknown Album',
+		// artwork: metadata.artwork,
+	});
+});
