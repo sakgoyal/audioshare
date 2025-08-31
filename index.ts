@@ -45,8 +45,8 @@ io.on('connection', (socket) => {
 		if (!groupStates.has(roomID)) {
 			groupStates.set(roomID, {
 				isPlaying: false,
-				currentTrack: null,
-				currentTime: 0,
+				filename: null,
+				time: 0,
 				activeClientID: null,
 			});
 		}
@@ -71,8 +71,8 @@ io.on('connection', (socket) => {
 			const state = groupStates.get(roomID);
 			if (state) {
 				state.isPlaying = true;
-				state.currentTrack = data.filename;
-				state.currentTime = data.time;
+				state.filename = data.filename;
+				state.time = data.time;
 				state.activeClientID = socket.id;
 
 				io.to(roomID).emit('globalState', state);
@@ -96,7 +96,7 @@ io.on('connection', (socket) => {
 			const state = groupStates.get(roomID);
 			if (state) {
 				state.isPlaying = false;
-				state.currentTime = data.time;
+				state.time = data.time;
 
 				io.to(roomID).emit('globalState', state);
 				console.log(`Pause: ${socket.id} paused at ${data.time}`);
@@ -109,7 +109,7 @@ io.on('connection', (socket) => {
 		if (roomID) {
 			const state = groupStates.get(roomID);
 			if (state && state.activeClientID === socket.id) {
-				state.currentTime = data.time;
+				state.time = data.time;
 
 				io.to(roomID).emit('globalState', state);
 				console.log(`Seek: ${socket.id} seeked to ${data.time}`);
@@ -123,8 +123,8 @@ io.on('connection', (socket) => {
 			const state = groupStates.get(roomID);
 			if (state) {
 				state.isPlaying = clientState.isPlaying;
-				state.currentTrack = clientState.filename;
-				state.currentTime = clientState.time;
+				state.filename = clientState.filename;
+				state.time = clientState.time;
 				state.activeClientID = targetClientID;
 
 				io.to(roomID).emit('globalState', state);

@@ -1,7 +1,7 @@
 type GlobalState = {
 	isPlaying: boolean;
-	currentTrack: string | null;
-	currentTime: number;
+	filename: string | null;
+	time: number;
 	activeClientID: string | null;
 };
 

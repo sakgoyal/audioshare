@@ -21,8 +21,8 @@ let myPlayAction = false; // Track when I initiated a play action
 let connectedClients = new Set<string>();
 let globalState: GlobalState = {
 	isPlaying: false,
-	currentTrack: null,
-	currentTime: 0,
+	filename: null,
+	time: 0,
 	activeClientID: null,
 };
 
@@ -44,7 +44,7 @@ function renderClients() {
 		const row = document.createElement('div');
 		row.className = `row client-row ${isActive ? 'playing' : ''}`;
 
-		const statusText = isActive && globalState.isPlaying ? `Playing: ${globalState.currentTrack}` : 'Idle';
+		const statusText = isActive && globalState.isPlaying ? `Playing: ${globalState.filename}` : 'Idle';
 
 		row.innerHTML = `<div><strong>${isSelf ? 'This Device - ' : ''}</strong> ${shortID}<br><small style="color: ${isActive && globalState.isPlaying ? '#4CAF50' : '#999'}">${statusText}</small></div>`;
 
@@ -71,7 +71,7 @@ function renderClients() {
 }
 
 function applyGlobalState() {
-	if (!globalState.currentTrack) {
+	if (!globalState.filename) {
 		// If no track is playing, pause all audio
 		document.querySelectorAll('audio').forEach((a) => {
 			a.pause();
@@ -81,7 +81,7 @@ function applyGlobalState() {
 	}
 
 	const targetAudio = [...document.querySelectorAll('audio')].find(
-		(a) => a.ariaLabel === globalState.currentTrack,
+		(a) => a.ariaLabel === globalState.filename,
 	);
 
 	if (!targetAudio) return;
@@ -97,7 +97,7 @@ function applyGlobalState() {
 	});
 
 	// Apply state to target audio
-	targetAudio.currentTime = globalState.currentTime;
+	targetAudio.currentTime = globalState.time;
 
 	if (globalState.isPlaying) {
 		if (globalState.activeClientID === socket.id) {
@@ -172,13 +172,10 @@ socket.on('requestCurrentState', (requestingClientID) => {
 	}
 });
 
-function sendStateUpdate(event: Event, type: keyof ClientToServerEvents) {
-	if (isProgrammaticChange) return;
+const onseeked = (event: Event) => {
 	const { currentTime, ariaLabel } = event.target as HTMLAudioElement;
-	socket.emit(type, { time: currentTime, filename: ariaLabel });
+	socket.emit('seeked', { time: currentTime, filename: ariaLabel! });
 }
-
-const onseeked = (event: Event) => sendStateUpdate(event, 'seeked');
 
 const onplay = (event: Event) => {
 	if (isProgrammaticChange) return;
@@ -209,13 +206,14 @@ const onplay = (event: Event) => {
 
 	// Update local state optimistically
 	globalState.isPlaying = true;
-	globalState.currentTrack = targetAudio.ariaLabel;
-	globalState.currentTime = targetAudio.currentTime;
+	globalState.filename = targetAudio.ariaLabel!;
+	globalState.time = targetAudio.currentTime;
 	globalState.activeClientID = socket.id!;
 
 	console.log('Updated local globalState optimistically:', globalState);
 
-	sendStateUpdate(event, 'play');
+	socket.emit('play', { filename: targetAudio.ariaLabel!, time: targetAudio.currentTime });
+
 	renderClients();
 
 	// Reset the flag after a short delay
@@ -231,14 +229,13 @@ const onpause = (event: Event) => {
 	const {ariaLabel, currentTime} = event.target as HTMLAudioElement;
 
 	console.log('User initiated pause:', { filename: ariaLabel, currentTime: currentTime });
-
-	sendStateUpdate(event, 'pause');
+	socket.emit('pause', {...globalState, filename: globalState.filename!});
 };
 
 socket.on('musicMetadata', (metadata) => {
 	console.log('Received music metadata:', metadata);
 	navigator.mediaSession.metadata = new MediaMetadata({
-		title: metadata.title ?? globalState.currentTrack ?? 'Unknown Title',
+		title: metadata.title ?? globalState.filename ?? 'Unknown Title',
 		artist: metadata.artist ?? 'Unknown Artist',
 		album: metadata.album ?? 'Unknown Album',
 		// artwork: metadata.artwork,
