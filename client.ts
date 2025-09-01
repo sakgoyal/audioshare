@@ -34,7 +34,7 @@ function renderClients() {
 	const clientsList = document.getElementById('clients-list') as HTMLDivElement;
 	clientsList.innerHTML = '';
 
-	const sortedClientIDs = Array.from(connectedClients).sort();
+	const sortedClientIDs = Array.from(connectedClients).sort((a, b) => (a === socket.id ? -1 : b === socket.id ? 1 : 0));
 
 	for (const clientID of sortedClientIDs) {
 		const isSelf = clientID === socket.id;
@@ -174,6 +174,7 @@ socket.on('requestCurrentState', (requestingClientID) => {
 
 const onseeked = (event: Event) => {
 	const { currentTime, ariaLabel } = event.target as HTMLAudioElement;
+	if (isProgrammaticChange) return;
 	socket.emit('seeked', { time: currentTime, filename: ariaLabel! });
 }
 
@@ -212,6 +213,7 @@ const onplay = (event: Event) => {
 
 	console.log('Updated local globalState optimistically:', globalState);
 
+	if (!isProgrammaticChange)
 	socket.emit('play', { filename: targetAudio.ariaLabel!, time: targetAudio.currentTime });
 
 	renderClients();
@@ -229,6 +231,7 @@ const onpause = (event: Event) => {
 	const {ariaLabel, currentTime} = event.target as HTMLAudioElement;
 
 	console.log('User initiated pause:', { filename: ariaLabel, currentTime: currentTime });
+	if (!isProgrammaticChange)
 	socket.emit('pause', {...globalState, filename: globalState.filename!});
 };
 
