@@ -128,11 +128,9 @@ socket.on('clientList', (clientList) => {
 });
 
 socket.on('globalState', (newState) => {
-	console.log('Received global state:', JSON.stringify(newState, null, 2));
-	console.log('Previous global state:', JSON.stringify(globalState, null, 2));
-	console.log('myPlayAction:', myPlayAction, 'newState.activeClientID === socket.id:', newState.activeClientID === socket.id);
+	console.log('Received global state:', newState);
+	console.log('Previous global state:', globalState);
 
-	// Always update the global state
 	globalState = { ...newState };
 
 	// If this was my own play action, don't apply it to audio elements (they're already correct)
@@ -182,12 +180,6 @@ const onplay = (event: Event) => {
 	if (isProgrammaticChange) return;
 	const targetAudio = event.target as HTMLAudioElement;
 
-	console.log('User initiated play:', {
-		filename: targetAudio.ariaLabel,
-		currentTime: targetAudio.currentTime,
-		myPlayAction: myPlayAction,
-	});
-
 	// Mark that this is my action
 	myPlayAction = true;
 
@@ -211,8 +203,6 @@ const onplay = (event: Event) => {
 	globalState.time = targetAudio.currentTime;
 	globalState.activeClientID = socket.id!;
 
-	console.log('Updated local globalState optimistically:', globalState);
-
 	if (!isProgrammaticChange)
 	socket.emit('play', { filename: targetAudio.ariaLabel!, time: targetAudio.currentTime });
 
@@ -225,12 +215,9 @@ const onplay = (event: Event) => {
 	}, 500); // Increased timeout to be safer
 };
 
-const onpause = (event: Event) => {
+const onpause = (_event: Event) => {
 	if (isProgrammaticChange) return;
 
-	const {ariaLabel, currentTime} = event.target as HTMLAudioElement;
-
-	console.log('User initiated pause:', { filename: ariaLabel, currentTime: currentTime });
 	if (!isProgrammaticChange)
 	socket.emit('pause', {...globalState, filename: globalState.filename!});
 };
